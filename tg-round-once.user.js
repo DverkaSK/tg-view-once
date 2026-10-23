@@ -3,6 +3,9 @@
 // @namespace    tg-round-once
 // @version      1.0.0
 // @description  Adds "Send as View Once" to the send button menu when forwarding a video message
+// @homepageURL  https://github.com/DverkaSK/tg-round-once
+// @updateURL    https://raw.githubusercontent.com/DverkaSK/tg-round-once/main/tg-round-once.user.js
+// @downloadURL  https://raw.githubusercontent.com/DverkaSK/tg-round-once/main/tg-round-once.user.js
 // @match        https://web.telegram.org/k/*
 // @grant        none
 // @run-at       document-idle

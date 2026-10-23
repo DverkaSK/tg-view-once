@@ -6,8 +6,10 @@ Telegram only offers the view once option when you record a video message yourse
 
 ## Installation
 
+[![Install](https://img.shields.io/badge/Install-userscript-8774e1?style=for-the-badge)](https://raw.githubusercontent.com/DverkaSK/tg-round-once/main/tg-round-once.user.js)
+
 1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
-2. Create a new script and paste the contents of [`tg-round-once.user.js`](tg-round-once.user.js).
+2. Click the **Install** button above and confirm the installation.
 3. Open [web.telegram.org/k](https://web.telegram.org/k/). Version A is not supported.
 
 In Chrome and Edge you also need to turn on **Allow user scripts** in the extension details.

@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         Telegram Web K: View Once Media
-// @namespace    tg-round-once
-// @version      1.1.0
+// @name         Telegram Web: View Once Forward
+// @namespace    tg-view-once
+// @version      1.2.0
 // @description  Forward video messages as view once and photos or videos with a self-destruct timer
-// @homepageURL  https://github.com/DverkaSK/tg-round-once
-// @updateURL    https://raw.githubusercontent.com/DverkaSK/tg-round-once/main/tg-round-once.user.js
-// @downloadURL  https://raw.githubusercontent.com/DverkaSK/tg-round-once/main/tg-round-once.user.js
+// @homepageURL  https://github.com/DverkaSK/tg-view-once
+// @updateURL    https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
+// @downloadURL  https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
 // @match        https://web.telegram.org/k/*
 // @grant        none
 // @run-at       document-idle
@@ -296,7 +296,7 @@
       managers().apiUpdatesManager.processUpdateMessage(updates);
       chat.input.clearHelper();
     } catch(err) {
-      console.error('[tg-round-once]', err);
+      console.error('[tg-view-once]', err);
       toast(strings.failed + ': ' + (err.type || err.message || err));
     } finally {
       busy = false;
@@ -416,7 +416,7 @@
       if(media.kind !== 'round' && !isPrivateChat(chat)) return;
       addMenuItem(menu, media);
     } catch(err) {
-      console.error('[tg-round-once]', err);
+      console.error('[tg-view-once]', err);
     }
   }
 

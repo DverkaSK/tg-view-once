@@ -1,4 +1,4 @@
-# tg-round-once
+# tg-view-once
 
 Userscript for [Telegram Web K](https://web.telegram.org/k/) that lets you forward video messages as **view once** and photos or videos with a **self-destruct timer**.
 
@@ -6,7 +6,7 @@ Telegram only offers these options for media you send yourself. This script adds
 
 ## Installation
 
-[![Install](https://img.shields.io/badge/Install-userscript-8774e1?style=for-the-badge)](https://raw.githubusercontent.com/DverkaSK/tg-round-once/main/tg-round-once.user.js)
+[![Install](https://img.shields.io/badge/Install-userscript-8774e1?style=for-the-badge)](https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js)
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
 2. Click the **Install** button above and confirm the installation.
@@ -32,3 +32,7 @@ The script calls `messages.sendMedia` through Telegram Web's own API client, pas
 - Albums are not supported, forward one item at a time.
 - Relies on Telegram Web internals, so it may break after a Telegram Web update.
 - Video messages that were sent to you as view once cannot be forwarded.
+
+## License
+
+[MIT](LICENSE)

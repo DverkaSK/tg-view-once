@@ -1,8 +1,8 @@
 # tg-round-once
 
-Userscript for [Telegram Web K](https://web.telegram.org/k/) that lets you forward any video message (round video) as **view once**.
+Userscript for [Telegram Web K](https://web.telegram.org/k/) that lets you forward video messages as **view once** and photos or videos with a **self-destruct timer**.
 
-Telegram only offers the view once option when you record a video message yourself. This script adds it to forwarded ones too: the video message is sent from your name, without the "Forwarded from" header, and can be opened only once.
+Telegram only offers these options for media you send yourself. This script adds them to forwarded media too: it is sent from your name, without the "Forwarded from" header.
 
 ## Installation
 
@@ -16,16 +16,19 @@ In Chrome and Edge you also need to turn on **Allow user scripts** in the extens
 
 ## Usage
 
-1. Forward a single video message to a chat as usual.
+1. Forward a single video message, photo or video to a chat as usual.
 2. Right-click the send button.
-3. Choose **Send as View Once**.
+3. For a video message, choose **Send as View Once**.
+4. For a photo or video, choose **Send with Timer…**, pick view once or a timer from 3 seconds to 1 minute, and press **Send**.
 
 ## How it works
 
-The script calls `messages.sendMedia` through Telegram Web's own API client, passing the existing document with `ttl_seconds` set to the view once value. The file is not downloaded or uploaded again. If the file reference has expired, the message is reloaded and the request is retried.
+The script calls `messages.sendMedia` through Telegram Web's own API client, passing the existing photo or document with `ttl_seconds` set to the chosen timer. The file is not downloaded or uploaded again. If the file reference has expired, the message is reloaded and the request is retried.
 
 ## Limitations
 
 - Works only in Telegram Web K.
+- Self-destructing photos and videos are available only in private chats.
+- Albums are not supported, forward one item at a time.
 - Relies on Telegram Web internals, so it may break after a Telegram Web update.
 - Video messages that were sent to you as view once cannot be forwarded.

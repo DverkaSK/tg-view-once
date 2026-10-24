@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Telegram Web: View Once Forward
 // @namespace    tg-view-once
-// @version      1.3.1
+// @version      1.3.2
 // @description  Forward video messages as view once, photos or videos with a self-destruct timer, and send videos as video messages
 // @homepageURL  https://github.com/DverkaSK/tg-view-once
 // @updateURL    https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
@@ -603,10 +603,8 @@
     strings = /[а-яё]/i.test(template.textContent) ? STRINGS.ru : STRINGS.en;
 
     const popup = document.querySelector('.popup-new-media');
-    if(popup) {
-      const video = popupVideo(popup);
-      if(!video) return;
-
+    const video = popup && popupVideo(popup);
+    if(video) {
       addMenuItem(menu, ICON_ROUND, strings.sendRound, () => {
         runBusy(null, async() => {
           const blob = await (await fetch(video.src)).blob();

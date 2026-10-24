@@ -1,6 +1,6 @@
 # tg-view-once
 
-Userscript for [Telegram Web K](https://web.telegram.org/k/) that lets you forward video messages as **view once** and photos or videos with a **self-destruct timer**.
+Userscript for [Telegram Web K](https://web.telegram.org/k/) that lets you forward video messages as **view once**, photos or videos with a **self-destruct timer**, and send any video as a **video message** (round video), optionally view once.
 
 Telegram only offers these options for media you send yourself. This script adds them to forwarded media too: it is sent from your name, without the "Forwarded from" header.
 
@@ -21,9 +21,17 @@ In Chrome and Edge you also need to turn on **Allow user scripts** in the extens
 3. For a video message, choose **Send as View Once**.
 4. For a photo or video, choose **Send with Timer…**, pick view once or a timer from 3 seconds to 1 minute, and press **Send**.
 
+To send a video as a video message:
+
+1. Forward a single video, or attach one video from your computer.
+2. Right-click the send button in the chat or in the attachment window.
+3. Choose **Send as Video Message…**, pick view once or no timer, and press **Send**.
+
 ## How it works
 
 The script calls `messages.sendMedia` through Telegram Web's own API client, passing the existing photo or document with `ttl_seconds` set to the chosen timer. The file is not downloaded or uploaded again. If the file reference has expired, the message is reloaded and the request is retried.
+
+To make a video message, the video is converted in the browser with [Mediabunny](https://mediabunny.dev/) and WebCodecs: it is center-cropped to a square of up to 480×480, encoded as H.264 with AAC audio and cut to the first 60 seconds. The result is uploaded and sent as a round video with the chosen timer.
 
 ## Limitations
 
@@ -32,6 +40,7 @@ The script calls `messages.sendMedia` through Telegram Web's own API client, pas
 - Albums are not supported, forward one item at a time.
 - Relies on Telegram Web internals, so it may break after a Telegram Web update.
 - Video messages that were sent to you as view once cannot be forwarded.
+- Converting to a video message needs a browser with WebCodecs video encoding (current Chrome, Edge or Firefox). Videos longer than 60 seconds are cut.
 
 ## License
 

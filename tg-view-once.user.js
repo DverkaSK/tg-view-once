@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Telegram Web: View Once Forward
 // @namespace    tg-view-once
-// @version      1.2.0
-// @description  Forward video messages as view once and photos or videos with a self-destruct timer
+// @version      1.3.0
+// @description  Forward video messages as view once, photos or videos with a self-destruct timer, and send videos as video messages
 // @homepageURL  https://github.com/DverkaSK/tg-view-once
 // @updateURL    https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
 // @downloadURL  https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
 // @match        https://web.telegram.org/k/*
+// @require      https://cdn.jsdelivr.net/npm/mediabunny@1.61.3/dist/bundles/mediabunny.min.cjs
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -15,6 +16,8 @@
   'use strict';
 
   const VIEW_ONCE_TTL = 0x7FFFFFFF;
+  const ROUND_MAX_SIZE = 480;
+  const ROUND_MAX_DURATION = 60;
 
   const css = `
     .tro-item .tro-icon {
@@ -143,28 +146,48 @@
     </svg>
   `;
 
+  const ICON_ROUND = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M10 8.5v7l5.5-3.5z" stroke-linejoin="round" />
+    </svg>
+  `;
+
   const STRINGS = {
     ru: {
       sendOnce: 'Отправить для однократного просмотра',
       sendTimer: 'Отправить с таймером…',
+      sendRound: 'Отправить кружком…',
       title: 'Таймер самоуничтожения',
+      roundTitle: 'Видеосообщение',
       cancel: 'Отмена',
       send: 'Отправить',
       failed: 'Не удалось отправить',
-      timers: ['Один просмотр', '3 секунды', '10 секунд', '30 секунд', '1 минута']
+      converting: 'Конвертация видео',
+      uploading: 'Загрузка видео…',
+      noEncoder: 'браузер не поддерживает кодирование видео',
+      timers: ['Один просмотр', '3 секунды', '10 секунд', '30 секунд', '1 минута'],
+      roundTimers: ['Один просмотр', 'Без таймера']
     },
     en: {
       sendOnce: 'Send as View Once',
       sendTimer: 'Send with Timer…',
+      sendRound: 'Send as Video Message…',
       title: 'Self-Destruct Timer',
+      roundTitle: 'Video Message',
       cancel: 'Cancel',
       send: 'Send',
       failed: 'Failed to send',
-      timers: ['View once', '3 seconds', '10 seconds', '30 seconds', '1 minute']
+      converting: 'Converting video',
+      uploading: 'Uploading video…',
+      noEncoder: 'video encoding is not supported by this browser',
+      timers: ['View once', '3 seconds', '10 seconds', '30 seconds', '1 minute'],
+      roundTimers: ['View once', 'No timer']
     }
   };
 
   const TIMERS = [VIEW_ONCE_TTL, 3, 10, 30, 60];
+  const ROUND_TIMERS = [VIEW_ONCE_TTL, 0];
 
   document.head.appendChild(Object.assign(document.createElement('style'), {textContent: css}));
 
@@ -175,6 +198,15 @@
     const el = Object.assign(document.createElement('div'), {className: 'tro-toast', textContent: text});
     document.body.appendChild(el);
     setTimeout(() => el.remove(), ms);
+  }
+
+  function statusToast() {
+    const el = Object.assign(document.createElement('div'), {className: 'tro-toast'});
+    document.body.appendChild(el);
+    return {
+      set: (text) => el.textContent = text,
+      close: () => el.remove()
+    };
   }
 
   function randomLong() {
@@ -267,34 +299,102 @@
     });
   }
 
+  function isFileReferenceError(err) {
+    return err.type === 'FILE_REFERENCE_EXPIRED' || err.type === 'FILE_REFERENCE_INVALID';
+  }
+
+  async function convertToRound(blob, onProgress) {
+    if(typeof VideoEncoder === 'undefined') throw new Error(strings.noEncoder);
+
+    const input = new Mediabunny.Input({source: new Mediabunny.BlobSource(blob), formats: Mediabunny.ALL_FORMATS});
+    try {
+      const track = await input.getPrimaryVideoTrack();
+      if(!track) throw new Error('video track not found');
+
+      const width = await track.getDisplayWidth();
+      const height = await track.getDisplayHeight();
+      const side = Math.min(width, height, ROUND_MAX_SIZE) & ~1;
+      const duration = Math.min(await input.computeDuration(), ROUND_MAX_DURATION);
+
+      const output = new Mediabunny.Output({
+        format: new Mediabunny.Mp4OutputFormat({fastStart: 'in-memory'}),
+        target: new Mediabunny.BufferTarget()
+      });
+
+      const conversion = await Mediabunny.Conversion.init({
+        input,
+        output,
+        video: {
+          width: side,
+          height: side,
+          fit: 'cover',
+          codec: 'avc',
+          quality: Mediabunny.QUALITY_HIGH,
+          allowTransformationMetadata: false
+        },
+        audio: {codec: 'aac'},
+        trim: {end: duration},
+        showWarnings: false
+      });
+      if(!conversion.isValid) {
+        throw new Error(conversion.discardedTracks.map((discarded) => discarded.reason).join(', '));
+      }
+
+      conversion.onProgress = onProgress;
+      await conversion.execute();
+
+      return {blob: new Blob([output.target.buffer], {type: 'video/mp4'}), side, duration};
+    } finally {
+      input.dispose();
+    }
+  }
+
+  async function sendRound(peerId, blob, ttl, status) {
+    status.set(strings.converting + '…');
+    const round = await convertToRound(blob, (progress) => {
+      status.set(strings.converting + ' ' + Math.round(progress * 100) + '%');
+    });
+
+    status.set(strings.uploading);
+    const file = await managers().apiFileManager.upload({file: round.blob, fileName: 'video.mp4'});
+
+    const peer = await managers().appPeersManager.getInputPeerById(peerId);
+    const updates = await managers().apiManager.invokeApi('messages.sendMedia', {
+      peer,
+      media: {
+        _: 'inputMediaUploadedDocument',
+        file,
+        mime_type: 'video/mp4',
+        attributes: [{
+          _: 'documentAttributeVideo',
+          pFlags: {round_message: true, supports_streaming: true},
+          duration: round.duration,
+          w: round.side,
+          h: round.side
+        }],
+        ttl_seconds: ttl || undefined,
+        pFlags: {}
+      },
+      message: '',
+      random_id: randomLong()
+    });
+
+    managers().apiUpdatesManager.processUpdateMessage(updates);
+  }
+
   function closeMenus() {
     ['mousedown', 'click'].forEach((type) => {
       document.body.dispatchEvent(new MouseEvent(type, {bubbles: true}));
     });
   }
 
-  async function sendForwarded(ttl, item) {
-    const chat = currentChat();
-    const source = forwardedMessage(chat);
-    if(!chat || !chat.peerId || !source || busy) return;
+  async function runBusy(item, task) {
+    if(busy) return;
 
     busy = true;
     if(item) item.classList.add('is-busy');
     try {
-      const media = await loadMedia(source);
-      if(!media) throw new Error('media not found');
-
-      const peer = await managers().appPeersManager.getInputPeerById(chat.peerId);
-      let updates;
-      try {
-        updates = await sendMedia(peer, media, ttl);
-      } catch(err) {
-        if(err.type !== 'FILE_REFERENCE_EXPIRED' && err.type !== 'FILE_REFERENCE_INVALID') throw err;
-        updates = await sendMedia(peer, await reloadMedia(source), ttl);
-      }
-
-      managers().apiUpdatesManager.processUpdateMessage(updates);
-      chat.input.clearHelper();
+      await task();
     } catch(err) {
       console.error('[tg-view-once]', err);
       toast(strings.failed + ': ' + (err.type || err.message || err));
@@ -304,7 +404,68 @@
     }
   }
 
-  function openTimerPopup() {
+  function sendForwarded(ttl, item) {
+    const chat = currentChat();
+    const source = forwardedMessage(chat);
+    if(!chat || !chat.peerId || !source) return;
+
+    return runBusy(item, async() => {
+      const media = await loadMedia(source);
+      if(!media) throw new Error('media not found');
+
+      const peer = await managers().appPeersManager.getInputPeerById(chat.peerId);
+      let updates;
+      try {
+        updates = await sendMedia(peer, media, ttl);
+      } catch(err) {
+        if(!isFileReferenceError(err)) throw err;
+        updates = await sendMedia(peer, await reloadMedia(source), ttl);
+      }
+
+      managers().apiUpdatesManager.processUpdateMessage(updates);
+      chat.input.clearHelper();
+    });
+  }
+
+  function sendForwardedRound(ttl) {
+    const chat = currentChat();
+    const source = forwardedMessage(chat);
+    if(!chat || !chat.peerId || !source) return;
+
+    return runBusy(null, async() => {
+      const status = statusToast();
+      try {
+        const media = await loadMedia(source);
+        if(!media) throw new Error('media not found');
+
+        status.set(strings.converting + '…');
+        const blob = await managers().apiFileManager.downloadMedia({media: media.file});
+        await sendRound(chat.peerId, blob, ttl, status);
+        chat.input.clearHelper();
+      } finally {
+        status.close();
+      }
+    });
+  }
+
+  function sendPopupRound(popup, blob, ttl) {
+    const chat = currentChat();
+    if(!chat || !chat.peerId) return;
+
+    const closeButton = popup.querySelector('.popup-close');
+    if(closeButton) closeButton.click();
+
+    return runBusy(null, async() => {
+      const status = statusToast();
+      try {
+        await sendRound(chat.peerId, blob, ttl, status);
+      } finally {
+        status.close();
+      }
+    });
+  }
+
+  function openChoicePopup(titleText, labels, onSend) {
     let selected = 0;
 
     const overlay = document.createElement('div');
@@ -314,15 +475,15 @@
     popup.className = 'tro-popup';
     overlay.appendChild(popup);
 
-    const title = Object.assign(document.createElement('div'), {className: 'tro-popup-title', textContent: strings.title});
+    const title = Object.assign(document.createElement('div'), {className: 'tro-popup-title', textContent: titleText});
     popup.appendChild(title);
 
-    const options = TIMERS.map((ttl, index) => {
+    const options = labels.map((label, index) => {
       const option = document.createElement('button');
       option.type = 'button';
       option.className = 'tro-option';
       option.innerHTML = '<span class="tro-radio"></span><span></span>';
-      option.lastChild.textContent = strings.timers[index];
+      option.lastChild.textContent = label;
       option.addEventListener('click', () => select(index));
       option.addEventListener('dblclick', send);
       popup.appendChild(option);
@@ -348,7 +509,7 @@
 
     function send() {
       close();
-      sendForwarded(TIMERS[selected]);
+      onSend(selected);
     }
 
     function onKeyDown(e) {
@@ -371,12 +532,25 @@
     sendButton.focus();
   }
 
-  function addMenuItem(menu, media) {
-    const template = menu.querySelector('.btn-menu-item');
-    if(!template) return;
+  function openTimerPopup() {
+    openChoicePopup(strings.title, strings.timers, (index) => sendForwarded(TIMERS[index]));
+  }
 
-    strings = /[а-яё]/i.test(template.textContent) ? STRINGS.ru : STRINGS.en;
-    const isRound = media.kind === 'round';
+  function openRoundPopup(onSend) {
+    openChoicePopup(strings.roundTitle, strings.roundTimers, (index) => onSend(ROUND_TIMERS[index]));
+  }
+
+  function popupVideo(popup) {
+    const items = popup.querySelectorAll('.popup-item-media');
+    if(items.length !== 1) return null;
+
+    const videos = items[0].querySelectorAll('video');
+    const video = videos[videos.length - 1];
+    return video && video.src.startsWith('blob:') ? video : null;
+  }
+
+  function addMenuItem(menu, iconHtml, textContent, onClick) {
+    const template = menu.querySelector('.btn-menu-item');
 
     const item = template.cloneNode(true);
     item.classList.add('tro-item');
@@ -384,23 +558,54 @@
 
     const icon = document.createElement('span');
     icon.className = 'btn-menu-item-icon tro-icon';
-    icon.innerHTML = isRound ? ICON_ONCE : ICON_TIMER;
+    icon.innerHTML = iconHtml;
     const templateIcon = item.querySelector('.btn-menu-item-icon');
     if(templateIcon) templateIcon.replaceWith(icon);
     else item.prepend(icon);
 
     const text = item.querySelector('.btn-menu-item-text');
-    if(text) text.textContent = isRound ? strings.sendOnce : strings.sendTimer;
+    if(text) text.textContent = textContent;
 
     item.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       closeMenus();
-      if(isRound) sendForwarded(VIEW_ONCE_TTL, item);
-      else openTimerPopup();
+      onClick(item);
     });
 
     template.before(item);
+  }
+
+  function fillMenu(menu) {
+    const template = menu.querySelector('.btn-menu-item');
+    if(!template) return;
+    strings = /[а-яё]/i.test(template.textContent) ? STRINGS.ru : STRINGS.en;
+
+    const popup = document.querySelector('.popup-new-media');
+    if(popup) {
+      const video = popupVideo(popup);
+      if(!video) return;
+
+      addMenuItem(menu, ICON_ROUND, strings.sendRound, () => {
+        runBusy(null, async() => {
+          const blob = await (await fetch(video.src)).blob();
+          openRoundPopup((ttl) => sendPopupRound(popup, blob, ttl));
+        });
+      });
+      return;
+    }
+
+    const chat = currentChat();
+    const media = forwardedMediaSync(chat);
+    if(!media) return;
+
+    if(media.kind === 'round') {
+      addMenuItem(menu, ICON_ONCE, strings.sendOnce, (item) => sendForwarded(VIEW_ONCE_TTL, item));
+      return;
+    }
+
+    if(isPrivateChat(chat)) addMenuItem(menu, ICON_TIMER, strings.sendTimer, openTimerPopup);
+    if(media.kind === 'video') addMenuItem(menu, ICON_ROUND, strings.sendRound, () => openRoundPopup(sendForwardedRound));
   }
 
   function onNodeAdded(node) {
@@ -410,11 +615,7 @@
     if(!menu || menu.querySelector('.tro-item')) return;
 
     try {
-      const chat = currentChat();
-      const media = forwardedMediaSync(chat);
-      if(!media) return;
-      if(media.kind !== 'round' && !isPrivateChat(chat)) return;
-      addMenuItem(menu, media);
+      fillMenu(menu);
     } catch(err) {
       console.error('[tg-view-once]', err);
     }

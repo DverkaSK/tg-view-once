@@ -4,3 +4,4 @@
 *.obj
 *.log
 tgvo_pattern.txt
+build/

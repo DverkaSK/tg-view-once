@@ -9,11 +9,11 @@ namespace {
 // The uploaded-document InputMedia carries no media bytes (the file content is
 // uploaded separately via upload.saveFilePart), so the blob is small and
 // structured and a scan for the id does not collide with file payload.
-std::optional<size_t> findUploadedDocument(const std::vector<uint8_t> &buffer) {
-	if (buffer.size() < 4) return std::nullopt;
-	for (size_t i = 0; i + 4 <= buffer.size(); i += 4) {
+std::optional<size_t> findUploadedDocument(const uint8_t *data, size_t size) {
+	if (size < 4) return std::nullopt;
+	for (size_t i = 0; i + 4 <= size; i += 4) {
 		uint32_t v;
-		std::memcpy(&v, buffer.data() + i, 4);
+		std::memcpy(&v, data + i, 4);
 		if (v == tl::kInputMediaUploadedDocument) return i;
 	}
 	return std::nullopt;
@@ -69,12 +69,13 @@ bool skipNonVideoAttribute(tl::Reader &r, uint32_t id) {
 
 } // namespace
 
-RoundResult MakeUploadedVideoRound(std::vector<uint8_t> &buffer) {
-	const auto start = findUploadedDocument(buffer);
+RoundResult MakeUploadedVideoRound(uint8_t *data, size_t size) {
+	if (!data) return RoundResult::NoUploadedDoc;
+	const auto start = findUploadedDocument(data, size);
 	if (!start) return RoundResult::NoUploadedDoc;
 
 	try {
-		tl::Reader r(buffer.data(), buffer.size());
+		tl::Reader r(data, size);
 		r.seek(*start);
 
 		if (r.readU32() != tl::kInputMediaUploadedDocument) {
@@ -95,12 +96,12 @@ RoundResult MakeUploadedVideoRound(std::vector<uint8_t> &buffer) {
 			if (attrId == tl::kDocAttrVideo) {
 				const size_t flagsOffset = r.pos();
 				uint32_t videoFlags;
-				std::memcpy(&videoFlags, buffer.data() + flagsOffset, 4);
+				std::memcpy(&videoFlags, data + flagsOffset, 4);
 				if (videoFlags & tl::kVideoFlagRoundMessage) {
 					return RoundResult::AlreadyRound;
 				}
 				videoFlags |= tl::kVideoFlagRoundMessage;
-				std::memcpy(buffer.data() + flagsOffset, &videoFlags, 4);
+				std::memcpy(data + flagsOffset, &videoFlags, 4);
 				return RoundResult::Modified;
 			}
 			if (!skipNonVideoAttribute(r, attrId)) {
@@ -111,6 +112,10 @@ RoundResult MakeUploadedVideoRound(std::vector<uint8_t> &buffer) {
 	} catch (const std::out_of_range &) {
 		return RoundResult::ParseError;
 	}
+}
+
+RoundResult MakeUploadedVideoRound(std::vector<uint8_t> &buffer) {
+	return MakeUploadedVideoRound(buffer.data(), buffer.size());
 }
 
 } // namespace mod

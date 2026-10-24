@@ -20,10 +20,14 @@ enum class RoundResult {
 	ParseError,      // structure didn't match the schema we expect
 };
 
-// Scans `buffer` for an inputMediaUploadedDocument, walks to its attribute
-// vector and flips round_message on the video attribute in place.
-// `buffer` may be the exact InputMedia blob or a larger request body that
-// contains one. Returns what happened; the buffer is mutated only on Modified.
+// Scans [data, data+size) for an inputMediaUploadedDocument, walks to its
+// attribute vector and flips round_message on the video attribute in place.
+// The range may be the exact InputMedia blob or a larger request body that
+// contains one. The length never changes, so this is safe to call on a live
+// request buffer. Returns what happened; bytes are mutated only on Modified.
+RoundResult MakeUploadedVideoRound(uint8_t *data, size_t size);
+
+// Convenience overload for the tests and CLI.
 RoundResult MakeUploadedVideoRound(std::vector<uint8_t> &buffer);
 
 } // namespace mod

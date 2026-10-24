@@ -9,6 +9,7 @@
 // (MinHook is recommended). Nothing here touches the network until that detour
 // is wired, so loading the DLL as-is is inert besides logging.
 #include "../core/round_rewrite.h"
+#include "vendor/minhook/include/MinHook.h"
 
 #include <windows.h>
 #include <psapi.h>
@@ -115,16 +116,26 @@ std::string readPatternFile() {
 volatile bool g_armed = false;
 
 // Called by the installed detour for every outgoing request body (plaintext TL,
-// before MTProto encryption). Wired up at the INTEGRATION POINT below.
+// before MTProto encryption). The round transform never changes the length, so
+// it is edited in place in the live buffer.
 void OnOutgoingRequest(uint8_t *data, size_t size) {
 	if (!g_armed || !data || !size) return;
-	std::vector<uint8_t> buf(data, data + size);
-	const auto result = mod::MakeUploadedVideoRound(buf);
+	const auto result = mod::MakeUploadedVideoRound(data, size);
 	if (result == mod::RoundResult::Modified) {
-		std::memcpy(data, buf.data(), size); // length is unchanged for round
 		g_armed = false;
 		logLine("armed send rewritten to round_message");
 	}
+}
+
+// Assumed signature of the send seam. PLACEHOLDER: the real function's
+// arguments depend on the located function; adjust this and ExtractBody once
+// the seam is identified. The scaffold and the self-test use this shape.
+using SeamFn = void (*)(uint8_t *body, size_t size);
+SeamFn g_originalSeam = nullptr;
+
+void DetourSeam(uint8_t *body, size_t size) {
+	OnOutgoingRequest(body, size);
+	if (g_originalSeam) g_originalSeam(body, size);
 }
 
 DWORD WINAPI worker(LPVOID) {
@@ -137,12 +148,20 @@ DWORD WINAPI worker(LPVOID) {
 			char buf[64];
 			std::snprintf(buf, sizeof(buf), "seam found at %p", (void *)*at);
 			logLine(buf);
-			// --- INTEGRATION POINT ---------------------------------------
-			// Install a detour at *at (e.g. MinHook: MH_CreateHook(*at, ...))
-			// whose callback hands the request body to OnOutgoingRequest()
-			// before calling the original. This is the only machine-specific
-			// step and needs the signature for your exact Telegram.exe.
-			(void)&OnOutgoingRequest;
+			// Install the detour at the located seam. The only thing left to
+			// match for a given Telegram build is SeamFn/ExtractBody above.
+			if (MH_Initialize() != MH_OK) {
+				logLine("MH_Initialize failed");
+			} else if (MH_CreateHook(
+					reinterpret_cast<void *>(*at),
+					reinterpret_cast<void *>(&DetourSeam),
+					reinterpret_cast<void **>(&g_originalSeam)) != MH_OK) {
+				logLine("MH_CreateHook failed");
+			} else if (MH_EnableHook(reinterpret_cast<void *>(*at)) != MH_OK) {
+				logLine("MH_EnableHook failed");
+			} else {
+				logLine("hook installed");
+			}
 		} else {
 			logLine("seam pattern not found - update tgvo_pattern.txt");
 		}

@@ -38,15 +38,23 @@ disk goes out as a video message.
 ## Layout
 
 - `core/` — the transform and its tests. `round_rewrite.{h,cpp}` finds the
-  uploaded document in a request body and sets `round_message`; `tl.h` is a
-  minimal TL reader/builder; `tests.cpp` has unit tests plus a fuzz pass. This
-  is fully verified offline, no injection and no account needed.
+  uploaded document in a request body and sets `round_message` in place (raw
+  pointer and `std::vector` overloads); `tl.h` is a minimal TL reader/builder;
+  `tests.cpp` has unit tests plus a fuzz pass. Verified offline, no injection
+  and no account needed.
 - `cli/roundtool.cpp` — applies the transform to a raw request body on disk, to
   validate the core against a real capture.
-- `dll/round_dll.cpp` — injectable scaffold: it scans the loaded Telegram module
-  for the send seam by byte signature, logs it, and toggles an "armed" state
-  with Ctrl+Alt+R. The one machine-specific step, installing the detour at the
-  located address, is marked `INTEGRATION POINT` in the source.
+- `dll/round_dll.cpp` — injectable DLL: scans the loaded Telegram module for the
+  send seam by byte signature (from `tgvo_pattern.txt`), installs a detour there
+  with MinHook that hands the request body to the core, and toggles an "armed"
+  state with Ctrl+Alt+R. The `SeamFn`/`ExtractBody` shape is the only thing to
+  match per Telegram build once the seam is identified.
+- `dll/hook_selftest.cpp` — in-process proof of the whole engine: hooks a local
+  stand-in for the seam with MinHook and checks the detour edits the buffer in
+  place and the original still runs (trampoline intact). Runs offline.
+- `dll/vendor/minhook/` — vendored MinHook (MIT), the x64 hook/trampoline engine.
+- `tools/inject.cpp` — DLL injector (CreateRemoteThread + LoadLibraryA).
+- `SEAM.md` — how to find the send seam signature with a runtime debugger.
 
 ## Build
 
@@ -61,21 +69,17 @@ Needs a C++17 compiler; tested with MinGW-w64 g++.
 
 - [x] Core transform + unit/fuzz tests (round_message, upload path)
 - [x] CLI to run the transform on a captured request body
-- [x] DLL scaffold: module signature scan, hotkey toggle, core integrated
-- [ ] The detour at the send seam (needs the signature for a specific
-      Telegram.exe and a trampoline such as MinHook)
-- [ ] Injection/loading of the DLL
+- [x] Hook engine proven end-to-end offline (MinHook trampoline + core,
+      `hook_selftest`: detour edits in place, original still runs)
+- [x] DLL: module signature scan, MinHook detour install, hotkey toggle
+- [x] Injector (CreateRemoteThread + LoadLibraryA), builds
+- [ ] The send-seam **signature** for a specific Telegram.exe — a runtime
+      debugging step, see `SEAM.md`. Everything else is wired and waiting on it.
 - [ ] `ttl_seconds` (view once / timer), which requires growing the buffer
 
-## Finding the seam (the one binary-specific step)
-
-The detour must sit where the serialized request body is still plaintext TL,
-i.e. inside Telegram's own MTProto session code just before encryption — an
-internal, non-exported function, so it is located by a byte signature rather
-than an address. Put an IDA-style signature (e.g. `48 8B ?? ?? ?? ?? ?? 48 85`)
-in `tgvo_pattern.txt` next to the DLL; the scaffold scans for it and logs the
-match to `tgvo.log`. Once the address resolves, wire a trampoline there whose
-callback passes the body to `OnOutgoingRequest`.
+Telegram Desktop release builds statically link Qt, OpenSSL and ffmpeg, so there
+is no exported crypto function to hook near encryption; the seam is an internal
+function found by the recipe in `SEAM.md`.
 
 ## Caveats and risk
 

@@ -75,6 +75,34 @@ Reproduce the scan on a new build with the PE+`.pdata` walk used above (parse
 sections, scan `.text` for the 4-byte LE ids, bisect into the `.pdata` function
 ranges).
 
+## Runtime findings so far (tgprobe on one build)
+
+`tools/tgprobe.cpp` is a small, safe debugger (hardware breakpoints,
+`DebugSetProcessKillOnExit(FALSE)`, clean detach) used to probe the running
+client. Results on the build above, sending a video to Saved Messages:
+
+- HW-breakpoint mechanism verified: a BP on `kernel32!Sleep` fired 57× in 6s.
+- Module base observed `0x7ff7b80c0000` (same across restarts this session).
+- The constructor ids live **only in `.text` as immediates** (nothing in
+  `.rdata`/`.data`), so serialization writes them as immediates.
+- Ruled out as the outgoing serializer (did not fire on send, or wrong role):
+  - `0x1406dc8e0` — writes the sendMedia id into a request descriptor
+    (`[rsp+0x40]`), not the wire; never fired on send.
+  - `0x143cdf130` — a ~94 KB function that fills a stack **table** of all type
+    ids (`[rbp+0x80c]=video`, `[rbp+0x810]=audio`, …): a type registry, not a
+    per-request serializer.
+  - `0x143a23bf0` — fired on send but **reads** fields from a buffer
+    (`mov ecx,[r8]; mov [rdi+0x10],ecx`): it is the deserializer of the server's
+    echo of the sent message, not the outgoing path.
+  - `0x143a23410` — extremely hot generic attribute helper (1078 hits; `rax`
+    held `documentAttributeImageSize`'s id), not specific to the send.
+
+Still open: the exact function that serializes the outgoing
+`inputMediaUploadedDocument` / `documentAttributeVideo`. Next techniques to try:
+a value-filtered breakpoint on the generic "append primitive" function (filter
+the appended u32 == `0x330e77f`/`0x43c57c48`), or find the pre-encryption point
+(the AES-IGE call) and edit the plaintext there with the core.
+
 ## Risk
 
 Injecting into / debugging the official client is against Telegram's terms and

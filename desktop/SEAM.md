@@ -52,6 +52,29 @@ Before touching the live client, dump a real plaintext body to a file and run
 exactly the 4-byte video flags int (`00000000` -> `01000000`). That confirms the
 core matches the real wire layout of your Telegram version.
 
+## Static leads (found by analysing one build)
+
+These came from scanning `.text` for the constructor-id immediates and mapping
+each hit to its function via the `.pdata` table (400k functions). Addresses are
+**specific to one Telegram.exe build** (x64, ~250 MB, 2026-10-22) and will move
+on any other build — use the method, not the numbers.
+
+- `messages.sendMedia` (`0x0330e77f`) appears as a code immediate in only **two**
+  functions:
+  - `0x143cdf130` — a ~94 KB function that also contains most other ids: this is
+    the generated TL **deserialize** switch, not the send path. Ignore.
+  - `0x1406dc8e0` (443 bytes) — a small function with a stack canary that
+    allocates a ~0x378-byte object with a vtable and writes the sendMedia id.
+    This is the **request construction** site, the best starting point: set a
+    breakpoint here, send a video, and step/trace down to where the finished
+    request buffer is handed to the MTProto session and then encrypted. The
+    generic encryption seam carries no id, so it is reached from here, not found
+    by scanning.
+
+Reproduce the scan on a new build with the PE+`.pdata` walk used above (parse
+sections, scan `.text` for the 4-byte LE ids, bisect into the `.pdata` function
+ranges).
+
 ## Risk
 
 Injecting into / debugging the official client is against Telegram's terms and

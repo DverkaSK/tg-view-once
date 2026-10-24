@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Telegram Web: View Once Forward
 // @namespace    tg-view-once
-// @version      1.3.2
+// @version      1.3.3
 // @description  Forward video messages as view once, photos or videos with a self-destruct timer, and send videos as video messages
 // @homepageURL  https://github.com/DverkaSK/tg-view-once
 // @updateURL    https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
@@ -166,8 +166,11 @@
       cancel: 'Отмена',
       send: 'Отправить',
       failed: 'Не удалось отправить',
+      downloading: 'Скачивание видео…',
+      loadingConverter: 'Загрузка конвертера…',
       converting: 'Конвертация видео',
       uploading: 'Загрузка видео…',
+      sending: 'Отправка…',
       noEncoder: 'браузер не поддерживает кодирование видео',
       noConverter: 'не удалось загрузить конвертер видео',
       timers: ['Один просмотр', '3 секунды', '10 секунд', '30 секунд', '1 минута'],
@@ -182,8 +185,11 @@
       cancel: 'Cancel',
       send: 'Send',
       failed: 'Failed to send',
+      downloading: 'Downloading video…',
+      loadingConverter: 'Loading converter…',
       converting: 'Converting video',
       uploading: 'Uploading video…',
+      sending: 'Sending…',
       noEncoder: 'video encoding is not supported by this browser',
       noConverter: 'failed to load the video converter',
       timers: ['View once', '3 seconds', '10 seconds', '30 seconds', '1 minute'],
@@ -210,7 +216,10 @@
     const el = Object.assign(document.createElement('div'), {className: 'tro-toast'});
     document.body.appendChild(el);
     return {
-      set: (text) => el.textContent = text,
+      set: (text, quiet) => {
+        el.textContent = text;
+        if(!quiet) console.log('[tg-view-once]', text);
+      },
       close: () => el.remove()
     };
   }
@@ -371,13 +380,17 @@
   }
 
   async function sendRound(peerId, blob, ttl, status) {
-    status.set(strings.converting + '…');
+    console.log('[tg-view-once] source video', blob.type, blob.size);
+    status.set(strings.loadingConverter);
     const round = await convertToRound(blob, (progress) => {
-      status.set(strings.converting + ' ' + Math.round(progress * 100) + '%');
+      status.set(strings.converting + ' ' + Math.round(progress * 100) + '%', true);
     });
 
+    console.log('[tg-view-once] converted', round.side, round.duration, round.blob.size);
     status.set(strings.uploading);
     const file = await managers().apiFileManager.upload({file: round.blob, fileName: 'video.mp4'});
+
+    status.set(strings.sending);
 
     const peer = await managers().appPeersManager.getInputPeerById(peerId);
     const updates = await managers().apiManager.invokeApi('messages.sendMedia', {
@@ -401,6 +414,7 @@
     });
 
     managers().apiUpdatesManager.processUpdateMessage(updates);
+    console.log('[tg-view-once] sent');
   }
 
   function closeMenus() {
@@ -459,7 +473,7 @@
         const media = await loadMedia(source);
         if(!media) throw new Error('media not found');
 
-        status.set(strings.converting + '…');
+        status.set(strings.downloading);
         const blob = await managers().apiFileManager.downloadMedia({media: media.file});
         await sendRound(chat.peerId, blob, ttl, status);
         chat.input.clearHelper();

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Telegram Web: View Once Forward
 // @namespace    tg-view-once
-// @version      1.3.4
+// @version      1.4.0
 // @description  Forward video messages as view once, photos or videos with a self-destruct timer, and send videos as video messages
 // @homepageURL  https://github.com/DverkaSK/tg-view-once
 // @updateURL    https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
@@ -15,13 +15,6 @@
   'use strict';
 
   const VIEW_ONCE_TTL = 0x7FFFFFFF;
-  const ROUND_MAX_SIZE = 384;
-  const ROUND_VIDEO_BITRATE = 800000;
-  const ROUND_MAX_DURATION = 60;
-  const MEDIABUNNY_URLS = [
-    'https://cdn.jsdelivr.net/npm/mediabunny@1.61.3/dist/bundles/mediabunny.min.mjs',
-    'https://unpkg.com/mediabunny@1.61.3/dist/bundles/mediabunny.min.mjs'
-  ];
 
   const css = `
     .tro-item .tro-icon {
@@ -168,12 +161,8 @@
       send: 'Отправить',
       failed: 'Не удалось отправить',
       downloading: 'Скачивание видео…',
-      loadingConverter: 'Загрузка конвертера…',
-      converting: 'Конвертация видео',
       uploading: 'Загрузка видео…',
       sending: 'Отправка…',
-      noEncoder: 'браузер не поддерживает кодирование видео',
-      noConverter: 'не удалось загрузить конвертер видео',
       timers: ['Один просмотр', '3 секунды', '10 секунд', '30 секунд', '1 минута'],
       roundTimers: ['Один просмотр', 'Без таймера']
     },
@@ -187,12 +176,8 @@
       send: 'Send',
       failed: 'Failed to send',
       downloading: 'Downloading video…',
-      loadingConverter: 'Loading converter…',
-      converting: 'Converting video',
       uploading: 'Uploading video…',
       sending: 'Sending…',
-      noEncoder: 'video encoding is not supported by this browser',
-      noConverter: 'failed to load the video converter',
       timers: ['View once', '3 seconds', '10 seconds', '30 seconds', '1 minute'],
       roundTimers: ['View once', 'No timer']
     }
@@ -205,7 +190,6 @@
 
   let strings = STRINGS.en;
   let busy = false;
-  let mediabunnyPromise = null;
 
   function toast(text, ms = 4000) {
     const el = Object.assign(document.createElement('div'), {className: 'tro-toast', textContent: text});
@@ -319,93 +303,34 @@
     return err.type === 'FILE_REFERENCE_EXPIRED' || err.type === 'FILE_REFERENCE_INVALID';
   }
 
-  function loadMediabunny() {
-    if(!mediabunnyPromise) {
-      mediabunnyPromise = MEDIABUNNY_URLS.reduce((promise, url) => promise.catch(() => import(url)), Promise.reject());
-      mediabunnyPromise.catch((err) => {
-        console.error('[tg-view-once]', err);
-        mediabunnyPromise = null;
-      });
-    }
-    return mediabunnyPromise.catch(() => {
-      throw new Error(strings.noConverter);
-    });
+  function videoInfo(doc) {
+    const attribute = (doc.attributes || []).find((a) => a._ === 'documentAttributeVideo') || {};
+    return {
+      w: doc.w || attribute.w || 0,
+      h: doc.h || attribute.h || 0,
+      duration: doc.duration || attribute.duration || 0
+    };
   }
 
-  async function convertToRound(blob, onProgress) {
-    if(typeof VideoEncoder === 'undefined') throw new Error(strings.noEncoder);
-
-    const Mediabunny = await loadMediabunny();
-
-    const input = new Mediabunny.Input({source: new Mediabunny.BlobSource(blob), formats: Mediabunny.ALL_FORMATS});
-    try {
-      const track = await input.getPrimaryVideoTrack();
-      if(!track) throw new Error('video track not found');
-
-      const width = await track.getDisplayWidth();
-      const height = await track.getDisplayHeight();
-      const side = Math.min(width, height, ROUND_MAX_SIZE) & ~1;
-      const duration = Math.min(await input.computeDuration(), ROUND_MAX_DURATION);
-
-      const output = new Mediabunny.Output({
-        format: new Mediabunny.Mp4OutputFormat({fastStart: 'in-memory'}),
-        target: new Mediabunny.BufferTarget()
-      });
-
-      const conversion = await Mediabunny.Conversion.init({
-        input,
-        output,
-        video: {
-          width: side,
-          height: side,
-          fit: 'cover',
-          codec: 'avc',
-          bitrate: ROUND_VIDEO_BITRATE,
-          allowTransformationMetadata: false
-        },
-        audio: {codec: 'aac'},
-        trim: {end: duration},
-        showWarnings: false
-      });
-      if(!conversion.isValid) {
-        throw new Error(conversion.discardedTracks.map((discarded) => discarded.reason).join(', '));
-      }
-
-      conversion.onProgress = onProgress;
-      await conversion.execute();
-
-      return {blob: new Blob([output.target.buffer], {type: 'video/mp4'}), side, duration};
-    } finally {
-      input.dispose();
-    }
-  }
-
-  async function sendRound(peerId, blob, ttl, status) {
-    console.log('[tg-view-once] source video', blob.type, blob.size);
-    status.set(strings.loadingConverter);
-    const round = await convertToRound(blob, (progress) => {
-      status.set(strings.converting + ' ' + Math.round(progress * 100) + '%', true);
-    });
-
-    console.log('[tg-view-once] converted', round.side, round.duration, round.blob.size);
+  async function sendRound(peerId, blob, info, ttl, status) {
+    console.log('[tg-view-once] video', blob.type, blob.size, info);
     status.set(strings.uploading);
-    const file = await managers().apiFileManager.upload({file: round.blob, fileName: 'video.mp4'});
+    const file = await managers().apiFileManager.upload({file: blob, fileName: 'video.mp4'});
 
     status.set(strings.sending);
-
     const peer = await managers().appPeersManager.getInputPeerById(peerId);
     const updates = await managers().apiManager.invokeApi('messages.sendMedia', {
       peer,
       media: {
         _: 'inputMediaUploadedDocument',
         file,
-        mime_type: 'video/mp4',
+        mime_type: blob.type || 'video/mp4',
         attributes: [{
           _: 'documentAttributeVideo',
           pFlags: {round_message: true, supports_streaming: true},
-          duration: round.duration,
-          w: round.side,
-          h: round.side
+          duration: info.duration,
+          w: info.w,
+          h: info.h
         }],
         ttl_seconds: ttl || undefined,
         pFlags: {}
@@ -476,7 +401,7 @@
 
         status.set(strings.downloading);
         const blob = await managers().apiFileManager.downloadMedia({media: media.file});
-        await sendRound(chat.peerId, blob, ttl, status);
+        await sendRound(chat.peerId, blob, videoInfo(media.file), ttl, status);
         chat.input.clearHelper();
       } finally {
         status.close();
@@ -484,7 +409,7 @@
     });
   }
 
-  function sendPopupRound(popup, blob, ttl) {
+  function sendPopupRound(popup, blob, info, ttl) {
     const chat = currentChat();
     if(!chat || !chat.peerId) return;
 
@@ -494,7 +419,7 @@
     return runBusy(null, async() => {
       const status = statusToast();
       try {
-        await sendRound(chat.peerId, blob, ttl, status);
+        await sendRound(chat.peerId, blob, info, ttl, status);
       } finally {
         status.close();
       }
@@ -623,7 +548,8 @@
       addMenuItem(menu, ICON_ROUND, strings.sendRound, () => {
         runBusy(null, async() => {
           const blob = await (await fetch(video.src)).blob();
-          openRoundPopup((ttl) => sendPopupRound(popup, blob, ttl));
+          const info = {w: video.videoWidth, h: video.videoHeight, duration: video.duration || 0};
+          openRoundPopup((ttl) => sendPopupRound(popup, blob, info, ttl));
         });
       });
       return;

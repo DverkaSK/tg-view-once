@@ -1,0 +1,6 @@
+*.exe
+*.dll
+*.o
+*.obj
+*.log
+tgvo_pattern.txt

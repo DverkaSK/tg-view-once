@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Telegram Web: View Once Forward
 // @namespace    tg-view-once
-// @version      1.3.3
+// @version      1.3.4
 // @description  Forward video messages as view once, photos or videos with a self-destruct timer, and send videos as video messages
 // @homepageURL  https://github.com/DverkaSK/tg-view-once
 // @updateURL    https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
@@ -15,7 +15,8 @@
   'use strict';
 
   const VIEW_ONCE_TTL = 0x7FFFFFFF;
-  const ROUND_MAX_SIZE = 480;
+  const ROUND_MAX_SIZE = 384;
+  const ROUND_VIDEO_BITRATE = 800000;
   const ROUND_MAX_DURATION = 60;
   const MEDIABUNNY_URLS = [
     'https://cdn.jsdelivr.net/npm/mediabunny@1.61.3/dist/bundles/mediabunny.min.mjs',
@@ -359,7 +360,7 @@
           height: side,
           fit: 'cover',
           codec: 'avc',
-          quality: Mediabunny.QUALITY_HIGH,
+          bitrate: ROUND_VIDEO_BITRATE,
           allowTransformationMetadata: false
         },
         audio: {codec: 'aac'},

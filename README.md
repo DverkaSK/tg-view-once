@@ -31,7 +31,7 @@ To send a video as a video message:
 
 The script calls `messages.sendMedia` through Telegram Web's own API client, passing the existing photo or document with `ttl_seconds` set to the chosen timer. The file is not downloaded or uploaded again. If the file reference has expired, the message is reloaded and the request is retried.
 
-To make a video message, the video is converted in the browser with [Mediabunny](https://mediabunny.dev/) and WebCodecs: it is center-cropped to a square of up to 480×480, encoded as H.264 with AAC audio and cut to the first 60 seconds. The result is uploaded and sent as a round video with the chosen timer.
+To make a video message, the video is converted in the browser with [Mediabunny](https://mediabunny.dev/) and WebCodecs: it is center-cropped to a square of up to 384×384, encoded as H.264 at about 800 kbit/s with AAC audio and cut to the first 60 seconds. The result is uploaded and sent as a round video with the chosen timer.
 
 ## Limitations
 

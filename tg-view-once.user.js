@@ -1,13 +1,12 @@
 // ==UserScript==
 // @name         Telegram Web: View Once Forward
 // @namespace    tg-view-once
-// @version      1.3.0
+// @version      1.3.1
 // @description  Forward video messages as view once, photos or videos with a self-destruct timer, and send videos as video messages
 // @homepageURL  https://github.com/DverkaSK/tg-view-once
 // @updateURL    https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
 // @downloadURL  https://raw.githubusercontent.com/DverkaSK/tg-view-once/main/tg-view-once.user.js
 // @match        https://web.telegram.org/k/*
-// @require      https://cdn.jsdelivr.net/npm/mediabunny@1.61.3/dist/bundles/mediabunny.min.cjs
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -18,6 +17,10 @@
   const VIEW_ONCE_TTL = 0x7FFFFFFF;
   const ROUND_MAX_SIZE = 480;
   const ROUND_MAX_DURATION = 60;
+  const MEDIABUNNY_URLS = [
+    'https://cdn.jsdelivr.net/npm/mediabunny@1.61.3/dist/bundles/mediabunny.min.mjs',
+    'https://unpkg.com/mediabunny@1.61.3/dist/bundles/mediabunny.min.mjs'
+  ];
 
   const css = `
     .tro-item .tro-icon {
@@ -166,6 +169,7 @@
       converting: 'Конвертация видео',
       uploading: 'Загрузка видео…',
       noEncoder: 'браузер не поддерживает кодирование видео',
+      noConverter: 'не удалось загрузить конвертер видео',
       timers: ['Один просмотр', '3 секунды', '10 секунд', '30 секунд', '1 минута'],
       roundTimers: ['Один просмотр', 'Без таймера']
     },
@@ -181,6 +185,7 @@
       converting: 'Converting video',
       uploading: 'Uploading video…',
       noEncoder: 'video encoding is not supported by this browser',
+      noConverter: 'failed to load the video converter',
       timers: ['View once', '3 seconds', '10 seconds', '30 seconds', '1 minute'],
       roundTimers: ['View once', 'No timer']
     }
@@ -193,6 +198,7 @@
 
   let strings = STRINGS.en;
   let busy = false;
+  let mediabunnyPromise = null;
 
   function toast(text, ms = 4000) {
     const el = Object.assign(document.createElement('div'), {className: 'tro-toast', textContent: text});
@@ -303,8 +309,23 @@
     return err.type === 'FILE_REFERENCE_EXPIRED' || err.type === 'FILE_REFERENCE_INVALID';
   }
 
+  function loadMediabunny() {
+    if(!mediabunnyPromise) {
+      mediabunnyPromise = MEDIABUNNY_URLS.reduce((promise, url) => promise.catch(() => import(url)), Promise.reject());
+      mediabunnyPromise.catch((err) => {
+        console.error('[tg-view-once]', err);
+        mediabunnyPromise = null;
+      });
+    }
+    return mediabunnyPromise.catch(() => {
+      throw new Error(strings.noConverter);
+    });
+  }
+
   async function convertToRound(blob, onProgress) {
     if(typeof VideoEncoder === 'undefined') throw new Error(strings.noEncoder);
+
+    const Mediabunny = await loadMediabunny();
 
     const input = new Mediabunny.Input({source: new Mediabunny.BlobSource(blob), formats: Mediabunny.ALL_FORMATS});
     try {
